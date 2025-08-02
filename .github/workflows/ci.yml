@@ -59,18 +59,33 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: false
 
-      - name: Generate Proto Files
+      - name: Install protoc and buf (if proto changes detected)
         if: needs.changes.outputs.proto == 'true'
         run: |
+          # Install protoc
+          PB_REL="https://github.com/protocolbuffers/protobuf/releases"
+          curl -LO $PB_REL/download/v25.1/protoc-25.1-linux-x86_64.zip
+          unzip protoc-25.1-linux-x86_64.zip -d $HOME/.local
+          export PATH="$PATH:$HOME/.local/bin"
+          
+          # Install buf
+          curl -sSL "https://github.com/bufbuild/buf/releases/download/v1.28.1/buf-$(uname -s)-$(uname -m)" -o "$HOME/.local/bin/buf"
+          chmod +x "$HOME/.local/bin/buf"
+          
+          # Install Go protobuf plugins
           go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-          make proto
+          
+          # Generate proto files if they exist
+          if [ -f "buf.yaml" ]; then
+            buf generate
+          fi
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.61
-          args: --timeout=30m --config=./.golangci.pipeline.yml
+          args: --timeout=30m --config=./.golangci.yml
 
   security:
     needs: changes
@@ -82,15 +97,19 @@ jobs:
         with:
           go-version: ${{ env.GO_VERSION }}
 
+      - name: Install gosec
+        run: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+
       - name: Run Gosec Security Scanner
-        uses: securecodewarrior/github-action-gosec@master
-        with:
-          args: '-no-fail -fmt sarif -out results.sarif ./...'
+        run: |
+          gosec -fmt sarif -out results.sarif ./...
+        continue-on-error: true
 
       - name: Upload SARIF file
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: results.sarif
+        if: always()
 
   test:
     needs: changes
@@ -231,7 +250,7 @@ jobs:
           context: ./services/${{ matrix.service }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository }}/${{ matrix.service }}:latest
-            ghcr.io/${{ github.repository }}/${{ matrix.service }}:${{ github.sha }}
+            ghcr.io/neilpanic/cs2-market/${{ matrix.service }}:latest
+            ghcr.io/neilpanic/cs2-market/${{ matrix.service }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

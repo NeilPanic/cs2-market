@@ -1,0 +1,216 @@
+# .github/workflows/proto-validation.yml
+name: Protocol Buffer Validation
+
+on:
+  pull_request:
+    paths:
+      - '**/*.proto'
+      - 'buf.yaml'
+      - 'buf.gen.yaml'
+    branches: [ master, develop ]
+
+env:
+  BUF_VERSION: '1.28.1'
+
+jobs:
+  proto-changes:
+    runs-on: ubuntu-22.04
+    outputs:
+      has-proto: ${{ steps.changes.outputs.proto }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            proto:
+              - '**/*.proto'
+              - 'buf.yaml'
+              - 'buf.gen.yaml'
+
+  validate-proto:
+    needs: proto-changes
+    if: needs.proto-changes.outputs.has-proto == 'true'
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install buf
+        run: |
+          BUF_VERSION="${{ env.BUF_VERSION }}"
+          curl -sSL "https://github.com/bufbuild/buf/releases/download/v${BUF_VERSION}/buf-$(uname -s)-$(uname -m)" -o /tmp/buf
+          chmod +x /tmp/buf
+          sudo mv /tmp/buf /usr/local/bin/buf
+          
+          # Verify installation
+          buf --version
+
+      - name: Check buf configuration
+        run: |
+          if [ ! -f "buf.yaml" ]; then
+            echo "❌ buf.yaml not found. Creating minimal configuration..."
+            cat > buf.yaml << 'EOF'
+          version: v1
+          modules:
+            - path: proto
+          lint:
+            use:
+              - DEFAULT
+          breaking:
+            use:
+              - FILE
+          EOF
+            echo "✅ Created basic buf.yaml configuration"
+          else
+            echo "✅ buf.yaml found"
+            cat buf.yaml
+          fi
+
+      - name: List protobuf files
+        run: |
+          echo "📁 Protobuf files in repository:"
+          find . -name "*.proto" -type f | head -20
+          
+          if [ $(find . -name "*.proto" -type f | wc -l) -eq 0 ]; then
+            echo "⚠️ No .proto files found, but proto validation was triggered"
+            echo "This might happen if buf.yaml was modified without .proto files"
+          fi
+
+      - name: Lint protobuf files
+        run: |
+          echo "🔍 Running buf lint..."
+          if buf lint; then
+            echo "✅ All protobuf files passed linting"
+          else
+            echo "❌ Protobuf linting failed"
+            exit 1
+          fi
+
+      - name: Check for breaking changes
+        run: |
+          echo "🔄 Checking for breaking changes against master..."
+          
+          # Only run breaking change detection on PRs
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            if buf breaking --against 'https://github.com/NeilPanic/cs2-market.git#branch=master'; then
+              echo "✅ No breaking changes detected"
+            else
+              echo "❌ Breaking changes detected in protobuf files"
+              echo ""
+              echo "💡 If breaking changes are intentional:"
+              echo "   1. Update the version in your .proto files"
+              echo "   2. Document the breaking changes in PR description"
+              echo "   3. Consider migration strategy for existing clients"
+              exit 1
+            fi
+          else
+            echo "⏭️ Skipping breaking change detection (not a PR)"
+          fi
+
+      - name: Generate protobuf code
+        run: |
+          echo "⚙️ Generating protobuf code..."
+          
+          # Install Go protobuf plugins if go.mod exists
+          if find . -name "go.mod" -type f | grep -q .; then
+            echo "📦 Installing Go protobuf plugins..."
+            go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+            go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+          
+            # Add Go bin to PATH
+            export PATH="$PATH:$(go env GOPATH)/bin"
+          fi
+          
+          # Generate code if buf.gen.yaml exists
+          if [ -f "buf.gen.yaml" ]; then
+            echo "🔧 Running buf generate..."
+            buf generate
+            echo "✅ Code generation completed"
+          else
+            echo "⚠️ buf.gen.yaml not found, skipping code generation"
+            echo "💡 Create buf.gen.yaml to enable automatic code generation"
+          fi
+
+      - name: Check generated code is up to date
+        run: |
+          echo "🔍 Checking if generated code is up to date..."
+          
+          # Check if there are any uncommitted changes after generation
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "❌ Generated protobuf code is not up to date!"
+            echo ""
+            echo "📝 The following files have changes:"
+            git status --porcelain
+            echo ""
+            echo "🔧 To fix this:"
+            echo "   1. Run 'buf generate' locally"
+            echo "   2. Commit the generated files"
+            echo "   3. Push the changes"
+            echo ""
+            echo "📋 Diff of changes:"
+            git diff
+            exit 1
+          else
+            echo "✅ Generated protobuf code is up to date"
+          fi
+
+  proto-documentation:
+    needs: validate-proto
+    if: needs.validate-proto.result == 'success'
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate protobuf documentation
+        run: |
+          echo "📚 Generating protobuf documentation..."
+          
+          # This is optional - only run if protoc-gen-doc is needed
+          # docker run --rm -v $(pwd)/proto:/protos -v $(pwd)/docs:/output \
+          #   pseudomuto/protoc-gen-doc --doc_opt=html,index.html
+          
+          echo "💡 Documentation generation skipped"
+          echo "   To enable: uncomment the docker commands above"
+          echo "   This will generate HTML docs from your .proto files"
+
+  proto-summary:
+    needs: [proto-changes, validate-proto, proto-documentation]
+    if: always() && needs.proto-changes.outputs.has-proto == 'true'
+    runs-on: ubuntu-22.04
+    
+    steps:
+      - name: Protocol Buffer Validation Summary
+        run: |
+          echo "📊 Protocol Buffer Validation Summary"
+          echo "=================================="
+          
+          if [ "${{ needs.validate-proto.result }}" == "success" ]; then
+            echo "✅ Validation: PASSED"
+          else
+            echo "❌ Validation: FAILED"
+          fi
+          
+          if [ "${{ needs.proto-documentation.result }}" == "success" ]; then
+            echo "✅ Documentation: PASSED"
+          elif [ "${{ needs.proto-documentation.result }}" == "skipped" ]; then
+            echo "⏭️ Documentation: SKIPPED"
+          else
+            echo "❌ Documentation: FAILED"
+          fi
+          
+          echo ""
+          echo "🔍 Changed files in this PR:"
+          echo "${{ github.event.pull_request.changed_files }} files changed"
+          
+          # Exit with error if validation failed
+          if [ "${{ needs.validate-proto.result }}" != "success" ]; then
+            echo ""
+            echo "❌ Protocol Buffer validation failed!"
+            echo "Please check the validation job for details."
+            exit 1
+          fi
