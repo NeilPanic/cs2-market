@@ -16,14 +16,14 @@ jobs:
           fetch-depth: 0
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           branch: auto-merge/develop-to-master
           base: master
           title: 'Auto-merge: develop → master'
           body: |
-            🤖 **Automated PR**: Merging develop into master
+            🤖 **Automated PR by @NeilPanic**: Merging develop into master
             
             This PR was automatically created after successful CI on develop branch.
             
@@ -36,6 +36,8 @@ jobs:
             - [x] Code has been reviewed in feature PRs
             
             **This PR will be auto-merged if all status checks pass.**
+            
+            Created by: @NeilPanic
           labels: |
             auto-merge
             develop-to-master
