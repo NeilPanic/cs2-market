@@ -1,0 +1,49 @@
+# .github/workflows/auto-merge-master.yml
+name: Auto-merge to master
+
+on:
+  push:
+    branches: [ develop ]
+
+jobs:
+  auto-merge:
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: auto-merge/develop-to-master
+          base: master
+          title: 'Auto-merge: develop → master'
+          body: |
+            🤖 **Automated PR**: Merging develop into master
+            
+            This PR was automatically created after successful CI on develop branch.
+            
+            ## Changes
+            All commits from develop branch that passed CI checks.
+            
+            ## Checklist
+            - [x] All CI checks passed on develop
+            - [x] All tests are passing
+            - [x] Code has been reviewed in feature PRs
+            
+            **This PR will be auto-merged if all status checks pass.**
+          labels: |
+            auto-merge
+            develop-to-master
+          delete-branch: true
+
+      - name: Enable auto-merge
+        uses: peter-evans/enable-pull-request-automerge@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          pull-request-number: ${{ steps.create-pr.outputs.pull-request-number }}
+          merge-method: squash
