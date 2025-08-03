@@ -1,0 +1,81 @@
+syntax = "proto3";
+
+package auth;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/NeilPanic/cs2-market/proto/auth/v1";
+
+enum Role {
+  ROLE_UNSPECIFIED = 0;
+  ROLE_USER = 1;
+  ROLE_ADMIN = 2;
+  ROLE_MODERATOR = 3;
+}
+
+service AuthService {
+  rpc LoginWithSteam(LoginWithSteamRequest) returns (LoginWithSteamResponse);
+  rpc HandleSteamCallback(HandleSteamCallbackRequest) returns (HandleSteamCallbackResponse);
+  rpc RefreshToken(RefreshRequest) returns (RefreshResponse);
+  rpc ValidateToken(ValidateRequest) returns (ValidateResponse);
+}
+
+message LoginWithSteamRequest {
+  string redirect_url = 1;
+  string client_id = 2;
+}
+
+message LoginWithSteamResponse {
+  string steam_auth_url = 1;
+  // State parameter for CSRF protection
+  string state = 2;
+}
+
+message HandleSteamCallbackRequest {
+  // Steam OpenID response parameters
+  map<string, string> steam_params = 1;
+  // State parameter for CSRF validation
+  string state = 2;
+  // IP address of the user (for security)
+  string ip_address = 3;
+  // User agent string
+  string user_agent = 4;
+}
+
+message HandleSteamCallbackResponse {
+  // JWT access token
+  string access_token = 1;
+  // JWT refresh token
+  string refresh_token = 2;
+  // Token expiration time
+  google.protobuf.Timestamp expires_at = 3;
+  // User information
+  User user = 4;
+}
+
+message RefreshRequest {
+  string refresh_token =1;
+}
+
+message RefreshResponse {
+  string access_token = 1;
+  google.protobuf.Timestamp expires_at = 2;
+}
+
+message ValidateRequest {
+  string access_token = 1;
+}
+
+message ValidateResponse {
+  bool valid = 1;
+  google.protobuf.Timestamp expires_at = 2;
+  User user = 3;
+}
+
+message User {
+  string id = 1;              // UUID
+  string steam_id = 2;        // SteamID
+  string nickname = 3;
+  string avatar_url = 4;
+  Role role = 5;
+}
